@@ -20,3 +20,8 @@ spotifaux.js:10 [spotifaux] No player data available
 spotifaux.js:10 [spotifaux] Song change detected!
 spotifaux.js:10 [spotifaux] No player data available
 
+═══════════════════════════════════════════════════════════════════
+[2026-01-29T00:02:00Z]
+═══════════════════════════════════════════════════════════════════
+Seems like it's working! I put the output in console.out. If this output is what you expected, delete console.out and move on to phase 2!
+

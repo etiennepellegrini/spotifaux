@@ -3,3 +3,20 @@
 ═══════════════════════════════════════════════════════════════════
 Read CLAUDE.md and get started. I have Spicetify installed already. Target is Apple Music via Music.app for now. Start with Phase 1.
 
+═══════════════════════════════════════════════════════════════════
+[2026-01-29T00:01:00Z]
+═══════════════════════════════════════════════════════════════════
+Here's the output I got. Note that the song didn't pause.
+[spotifaux] Extension loading...
+spotifaux.js:10 [spotifaux] Spicetify API ready
+spotifaux.js:10 [spotifaux] Registered songchange listener
+spotifaux.js:10 [spotifaux] Registered play/pause listener
+spotifaux.js:10 [spotifaux] Extension initialized successfully!
+spotifaux.js:10 [spotifaux] Target: Apple Music (Music.app)
+spotifaux.js:10 [spotifaux] Status: Phase 1 - Intercept & Log
+spotifaux.js:10 [spotifaux] Play detected, triggering redirect check...
+spotifaux.js:10 [spotifaux] Song change detected!
+spotifaux.js:10 [spotifaux] No player data available
+spotifaux.js:10 [spotifaux] Song change detected!
+spotifaux.js:10 [spotifaux] No player data available
+

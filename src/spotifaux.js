@@ -10,41 +10,74 @@
         console.log(LOG_PREFIX, ...args);
     }
 
-    function logTrackInfo(track) {
-        if (!track) {
-            log('No track data available');
-            return;
+    function getTrackInfo() {
+        // Try multiple ways to get track data (API varies by Spicetify version)
+
+        // Method 1: Spicetify.Player.data.item (newer API)
+        if (Spicetify.Player.data?.item) {
+            const item = Spicetify.Player.data.item;
+            return {
+                name: item.name,
+                artist: item.artists?.[0]?.name || item.metadata?.artist_name || 'Unknown',
+                album: item.album?.name || item.metadata?.album_title || 'Unknown',
+                uri: item.uri,
+                source: 'data.item'
+            };
         }
 
-        const info = {
-            name: track.metadata?.title || 'Unknown',
-            artist: track.metadata?.artist_name || 'Unknown',
-            album: track.metadata?.album_title || 'Unknown',
-            uri: track.uri || 'Unknown',
-            duration: track.metadata?.duration || 0,
-        };
+        // Method 2: Spicetify.Player.data.track (older API)
+        if (Spicetify.Player.data?.track) {
+            const track = Spicetify.Player.data.track;
+            return {
+                name: track.metadata?.title || 'Unknown',
+                artist: track.metadata?.artist_name || 'Unknown',
+                album: track.metadata?.album_title || 'Unknown',
+                uri: track.uri,
+                source: 'data.track'
+            };
+        }
 
-        log('Track detected:', info);
-        log('Spotify URI:', info.uri);
-        log('Full metadata:', track.metadata);
+        // Method 3: Direct methods
+        const uri = Spicetify.Player.data?.track?.uri ||
+                    Spicetify.Player.data?.item?.uri ||
+                    null;
+
+        if (uri) {
+            return {
+                name: 'Unknown (URI only)',
+                artist: 'Unknown',
+                album: 'Unknown',
+                uri: uri,
+                source: 'fallback'
+            };
+        }
+
+        return null;
     }
 
-    function onSongChange() {
-        log('Song change detected!');
+    function handlePlayback(eventSource) {
+        log(`Handling playback (source: ${eventSource})`);
 
-        // Get current track data
-        const playerData = Spicetify.Player.data;
-        if (!playerData || !playerData.track) {
-            log('No player data available');
-            return;
-        }
-
-        const track = playerData.track;
-        logTrackInfo(track);
-
-        // Pause Spotify immediately
+        // ALWAYS pause first, regardless of whether we can get track info
         Spicetify.Player.pause();
         log('Playback paused');
+
+        // Debug: Log what's available
+        log('Spicetify.Player.data:', Spicetify.Player.data);
+
+        // Get track info
+        const trackInfo = getTrackInfo();
+
+        if (trackInfo) {
+            log('Track detected:', trackInfo);
+            log('Spotify URI:', trackInfo.uri);
+        } else {
+            log('Could not extract track info');
+            log('Available Player keys:', Object.keys(Spicetify.Player));
+            if (Spicetify.Player.data) {
+                log('Available data keys:', Object.keys(Spicetify.Player.data));
+            }
+        }
 
         // TODO Phase 2: Call Odesli API to get Apple Music link
         // TODO Phase 3: Open in Music.app via music:// URL scheme
@@ -54,24 +87,27 @@
         log('Extension loading...');
 
         // Wait for Spicetify APIs to be ready
-        if (!Spicetify.Player || !Spicetify.Player.addEventListener) {
+        if (!Spicetify?.Player?.addEventListener) {
             log('Spicetify not ready, retrying in 300ms...');
             setTimeout(init, 300);
             return;
         }
 
         log('Spicetify API ready');
+        log('Spicetify version:', Spicetify.Platform?.version || 'unknown');
 
         // Register song change listener
-        Spicetify.Player.addEventListener('songchange', onSongChange);
+        Spicetify.Player.addEventListener('songchange', (event) => {
+            log('songchange event fired', event);
+            handlePlayback('songchange');
+        });
         log('Registered songchange listener');
 
-        // Also hook into play button to catch the very first play
-        // This helps pause before audio actually starts
+        // Also hook into play/pause to catch play actions
         Spicetify.Player.addEventListener('onplaypause', (event) => {
+            log('onplaypause event fired, isPlaying:', Spicetify.Player.isPlaying());
             if (Spicetify.Player.isPlaying()) {
-                log('Play detected, triggering redirect check...');
-                onSongChange();
+                handlePlayback('onplaypause');
             }
         });
         log('Registered play/pause listener');

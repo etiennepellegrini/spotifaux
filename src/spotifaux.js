@@ -6,6 +6,7 @@
 
     const LOG_PREFIX = '[spotifaux]';
     const ODESLI_API = 'https://api.song.link/v1-alpha.1/links';
+    const CORS_PROXY = 'https://corsproxy.io/?';  // Needed because Spotify blocks cross-origin requests
     const TARGET_PLATFORM = 'appleMusic';
     const CACHE_KEY = 'spotifaux_cache';
     const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -93,8 +94,9 @@
             return null;
         }
 
-        const apiUrl = `${ODESLI_API}?url=${encodeURIComponent(spotifyUrl)}`;
-        log('Fetching from Odesli:', apiUrl);
+        const odesliUrl = `${ODESLI_API}?url=${encodeURIComponent(spotifyUrl)}`;
+        const apiUrl = `${CORS_PROXY}${encodeURIComponent(odesliUrl)}`;
+        log('Fetching from Odesli (via proxy):', odesliUrl);
 
         try {
             const response = await fetch(apiUrl);

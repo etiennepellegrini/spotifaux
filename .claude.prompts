@@ -25,3 +25,8 @@ spotifaux.js:10 [spotifaux] No player data available
 ═══════════════════════════════════════════════════════════════════
 Seems like it's working! I put the output in console.out. If this output is what you expected, delete console.out and move on to phase 2!
 
+═══════════════════════════════════════════════════════════════════
+[2026-01-29T00:03:00Z]
+═══════════════════════════════════════════════════════════════════
+Updated console.out. Unfortunately there's an error with the api call!
+

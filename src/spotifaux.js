@@ -1,20 +1,10 @@
 // spotifaux - Browse Spotify, Play Elsewhere
-// Phase 2: Odesli Integration + Apple Music Redirect
+// Phase 2: Open in song.link (redirects to Apple Music)
 
 (function Spotifaux() {
     'use strict';
 
     const LOG_PREFIX = '[spotifaux]';
-    const ODESLI_API = 'https://api.song.link/v1-alpha.1/links';
-    // CORS proxy - needed because Spotify blocks cross-origin requests
-    const CORS_PROXIES = [
-        'https://api.allorigins.win/raw?url=',
-        'https://corsproxy.io/?',
-    ];
-    let currentProxyIndex = 0;
-    const TARGET_PLATFORM = 'appleMusic';
-    const CACHE_KEY = 'spotifaux_cache';
-    const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
 
     // Track the last processed URI to avoid duplicate processing
     let lastProcessedUri = null;
@@ -22,32 +12,6 @@
     function log(...args) {
         console.log(LOG_PREFIX, ...args);
     }
-
-    // Simple localStorage cache for Odesli lookups
-    const cache = {
-        get(spotifyUri) {
-            try {
-                const data = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
-                const entry = data[spotifyUri];
-                if (entry && Date.now() - entry.timestamp < CACHE_MAX_AGE) {
-                    return entry.value;
-                }
-            } catch (e) {
-                log('Cache read error:', e);
-            }
-            return null;
-        },
-
-        set(spotifyUri, value) {
-            try {
-                const data = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
-                data[spotifyUri] = { value, timestamp: Date.now() };
-                localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-            } catch (e) {
-                log('Cache write error:', e);
-            }
-        }
-    };
 
     function getTrackInfo() {
         // Method 1: Spicetify.Player.data.item (newer API)
@@ -75,120 +39,34 @@
         return null;
     }
 
-    // Convert Spotify URI to open.spotify.com URL for Odesli
-    function spotifyUriToUrl(uri) {
-        // spotify:track:4JHxhiaDpp5omCMtOs1QrB -> https://open.spotify.com/track/4JHxhiaDpp5omCMtOs1QrB
-        const parts = uri.split(':');
+    // Convert Spotify URI to song.link URL
+    function getSongLinkUrl(spotifyUri) {
+        // spotify:track:4JHxhiaDpp5omCMtOs1QrB -> https://song.link/s/4JHxhiaDpp5omCMtOs1QrB
+        const parts = spotifyUri.split(':');
+        if (parts.length === 3 && parts[1] === 'track') {
+            return `https://song.link/s/${parts[2]}`;
+        }
+        // Fallback: use full Spotify URL
         if (parts.length === 3) {
-            return `https://open.spotify.com/${parts[1]}/${parts[2]}`;
+            return `https://song.link/https://open.spotify.com/${parts[1]}/${parts[2]}`;
         }
         return null;
     }
 
-    async function fetchWithTimeout(url, timeout = 10000) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-        try {
-            const response = await fetch(url, { signal: controller.signal });
-            clearTimeout(timeoutId);
-            return response;
-        } catch (error) {
-            clearTimeout(timeoutId);
-            throw error;
-        }
-    }
-
-    async function fetchOdesliLink(spotifyUri) {
-        // Check cache first
-        const cached = cache.get(spotifyUri);
-        if (cached) {
-            log('Cache hit for', spotifyUri);
-            return cached;
-        }
-
-        const spotifyUrl = spotifyUriToUrl(spotifyUri);
-        if (!spotifyUrl) {
-            log('Could not convert URI to URL:', spotifyUri);
-            return null;
-        }
-
-        const odesliUrl = `${ODESLI_API}?url=${encodeURIComponent(spotifyUrl)}`;
-
-        // Try each proxy until one works
-        for (let i = 0; i < CORS_PROXIES.length; i++) {
-            const proxyIndex = (currentProxyIndex + i) % CORS_PROXIES.length;
-            const proxy = CORS_PROXIES[proxyIndex];
-            const apiUrl = `${proxy}${encodeURIComponent(odesliUrl)}`;
-
-            log(`Fetching from Odesli (proxy ${proxyIndex + 1}/${CORS_PROXIES.length}):`, odesliUrl);
-
-            try {
-                const response = await fetchWithTimeout(apiUrl, 8000);
-                log('Response status:', response.status);
-
-                if (!response.ok) {
-                    if (response.status === 429) {
-                        log('Rate limited by Odesli API');
-                    } else {
-                        log('Odesli API error:', response.status, response.statusText);
-                    }
-                    continue; // Try next proxy
-                }
-
-                const data = await response.json();
-                log('Odesli response received');
-
-                // Remember which proxy worked
-                currentProxyIndex = proxyIndex;
-
-                // Extract Apple Music link
-                const appleMusic = data.linksByPlatform?.[TARGET_PLATFORM];
-                if (appleMusic?.url) {
-                    const result = {
-                        url: appleMusic.url,
-                        nativeUrl: appleMusic.nativeAppUriDesktop || appleMusic.nativeAppUriMobile,
-                        entityUniqueId: appleMusic.entityUniqueId,
-                    };
-                    cache.set(spotifyUri, result);
-                    log('Apple Music URL:', result.url);
-                    return result;
-                }
-
-                log('No Apple Music link found for this track');
-                cache.set(spotifyUri, { notFound: true });
-                return { notFound: true };
-
-            } catch (error) {
-                log(`Proxy ${proxyIndex + 1} failed:`, error.message);
-                // Continue to next proxy
-            }
-        }
-
-        log('All proxies failed');
-        return null;
-    }
-
-    function openInAppleMusic(linkData) {
-        if (!linkData || linkData.notFound) {
-            log('Cannot open: no Apple Music link available');
-            Spicetify.showNotification('Track not found on Apple Music', true);
+    function openSongLink(trackInfo) {
+        const url = getSongLinkUrl(trackInfo.uri);
+        if (!url) {
+            log('Could not generate song.link URL for:', trackInfo.uri);
+            Spicetify.showNotification('Could not open song.link', true);
             return;
         }
 
-        // Convert web URL to music:// URL scheme for direct app opening
-        // https://music.apple.com/us/album/... -> music://music.apple.com/us/album/...
-        let targetUrl = linkData.url;
-        if (targetUrl.startsWith('https://music.apple.com')) {
-            targetUrl = targetUrl.replace('https://', 'music://');
-        }
-
-        log('Opening in Apple Music:', targetUrl);
-        window.open(targetUrl, '_blank');
+        log('Opening song.link:', url);
+        window.open(url, '_blank');
+        Spicetify.showNotification(`Opening: ${trackInfo.name}`);
     }
 
-    async function handlePlayback(eventSource) {
-        // Get track info first to check if we should process
+    function handlePlayback(eventSource) {
         const trackInfo = getTrackInfo();
 
         if (!trackInfo) {
@@ -211,9 +89,8 @@
         // Mark as processed
         lastProcessedUri = trackInfo.uri;
 
-        // Fetch Apple Music link and open
-        const linkData = await fetchOdesliLink(trackInfo.uri);
-        openInAppleMusic(linkData);
+        // Open song.link
+        openSongLink(trackInfo);
     }
 
     function init() {
@@ -229,20 +106,19 @@
         log('Spicetify API ready');
 
         // Register song change listener
-        Spicetify.Player.addEventListener('songchange', (event) => {
+        Spicetify.Player.addEventListener('songchange', () => {
             handlePlayback('songchange');
         });
 
         // Also hook into play/pause to catch play actions
-        Spicetify.Player.addEventListener('onplaypause', (event) => {
+        Spicetify.Player.addEventListener('onplaypause', () => {
             if (Spicetify.Player.isPlaying()) {
                 handlePlayback('onplaypause');
             }
         });
 
         log('Extension initialized');
-        log('Target: Apple Music (Music.app)');
-        log('Status: Phase 2 - Odesli Integration');
+        log('Mode: Open song.link (click Apple Music to play)');
     }
 
     init();

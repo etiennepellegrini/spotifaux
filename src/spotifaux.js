@@ -6,7 +6,12 @@
 
     const LOG_PREFIX = '[spotifaux]';
     const ODESLI_API = 'https://api.song.link/v1-alpha.1/links';
-    const CORS_PROXY = 'https://corsproxy.io/?';  // Needed because Spotify blocks cross-origin requests
+    // CORS proxy - needed because Spotify blocks cross-origin requests
+    const CORS_PROXIES = [
+        'https://api.allorigins.win/raw?url=',
+        'https://corsproxy.io/?',
+    ];
+    let currentProxyIndex = 0;
     const TARGET_PLATFORM = 'appleMusic';
     const CACHE_KEY = 'spotifaux_cache';
     const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -80,6 +85,20 @@
         return null;
     }
 
+    async function fetchWithTimeout(url, timeout = 10000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            return response;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            throw error;
+        }
+    }
+
     async function fetchOdesliLink(spotifyUri) {
         // Check cache first
         const cached = cache.get(spotifyUri);
@@ -95,45 +114,59 @@
         }
 
         const odesliUrl = `${ODESLI_API}?url=${encodeURIComponent(spotifyUrl)}`;
-        const apiUrl = `${CORS_PROXY}${encodeURIComponent(odesliUrl)}`;
-        log('Fetching from Odesli (via proxy):', odesliUrl);
 
-        try {
-            const response = await fetch(apiUrl);
+        // Try each proxy until one works
+        for (let i = 0; i < CORS_PROXIES.length; i++) {
+            const proxyIndex = (currentProxyIndex + i) % CORS_PROXIES.length;
+            const proxy = CORS_PROXIES[proxyIndex];
+            const apiUrl = `${proxy}${encodeURIComponent(odesliUrl)}`;
 
-            if (!response.ok) {
-                if (response.status === 429) {
-                    log('Rate limited by Odesli API');
-                } else {
-                    log('Odesli API error:', response.status, response.statusText);
+            log(`Fetching from Odesli (proxy ${proxyIndex + 1}/${CORS_PROXIES.length}):`, odesliUrl);
+
+            try {
+                const response = await fetchWithTimeout(apiUrl, 8000);
+                log('Response status:', response.status);
+
+                if (!response.ok) {
+                    if (response.status === 429) {
+                        log('Rate limited by Odesli API');
+                    } else {
+                        log('Odesli API error:', response.status, response.statusText);
+                    }
+                    continue; // Try next proxy
                 }
-                return null;
+
+                const data = await response.json();
+                log('Odesli response received');
+
+                // Remember which proxy worked
+                currentProxyIndex = proxyIndex;
+
+                // Extract Apple Music link
+                const appleMusic = data.linksByPlatform?.[TARGET_PLATFORM];
+                if (appleMusic?.url) {
+                    const result = {
+                        url: appleMusic.url,
+                        nativeUrl: appleMusic.nativeAppUriDesktop || appleMusic.nativeAppUriMobile,
+                        entityUniqueId: appleMusic.entityUniqueId,
+                    };
+                    cache.set(spotifyUri, result);
+                    log('Apple Music URL:', result.url);
+                    return result;
+                }
+
+                log('No Apple Music link found for this track');
+                cache.set(spotifyUri, { notFound: true });
+                return { notFound: true };
+
+            } catch (error) {
+                log(`Proxy ${proxyIndex + 1} failed:`, error.message);
+                // Continue to next proxy
             }
-
-            const data = await response.json();
-            log('Odesli response:', data);
-
-            // Extract Apple Music link
-            const appleMusic = data.linksByPlatform?.[TARGET_PLATFORM];
-            if (appleMusic?.url) {
-                const result = {
-                    url: appleMusic.url,
-                    nativeUrl: appleMusic.nativeAppUriDesktop || appleMusic.nativeAppUriMobile,
-                    entityUniqueId: appleMusic.entityUniqueId,
-                };
-                cache.set(spotifyUri, result);
-                return result;
-            }
-
-            log('No Apple Music link found for this track');
-            // Cache the miss to avoid repeated lookups
-            cache.set(spotifyUri, { notFound: true });
-            return { notFound: true };
-
-        } catch (error) {
-            log('Odesli fetch error:', error);
-            return null;
         }
+
+        log('All proxies failed');
+        return null;
     }
 
     function openInAppleMusic(linkData) {
